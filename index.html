@@ -704,7 +704,8 @@ async function loadData(){
         intLim:gs(c,'ÍNTEGRA DA LIMINAR'), intSent:gs(c,'ÍNTEGRA DA SENTENÇA'), intAc:gs(c,'ÍNTEGRA DO ACÓRDÃO'),
         ultMov:gs(c,'ÚLTIMA MOVIMENTAÇÃO DO PROCESSO'), ultMovData:gsf(c,'DATA DA ÚLTIMA MOVIMENTAÇÃO DO PROCESSO'),
         ultTeor:gs(c,'INTEIRO TEOR DA ÚLTIMA MOVIMENTAÇÃO DO PROCESSO'),
-        ultVerif:gsf(c,'DATA DA ÚLTIMA VERIFICAÇÃO'), mapPor:gs(c,'MAPEADO POR')
+        ultVerif:gsf(c,'DATA DA ÚLTIMA VERIFICAÇÃO'), mapPor:gs(c,'MAPEADO POR'),
+        transito:gs(c,'TRÂNSITO EM JULGADO'), hist:gs(c,'HISTÓRICO DE MOVIMENTAÇÕES')
       };
     }).filter(Boolean);
     COVERAGE=computeCoverage(cols,rows,ci);
@@ -1482,15 +1483,18 @@ function renderMapeamento(){
   const verificados=ROWS.filter(r=>r.ultVerif);
   const comMov=ROWS.filter(r=>r.ultMov||r.ultMovData||r.ultTeor);
   const comInteg=ROWS.filter(r=>r.intLim||r.intSent||r.intAc);
+  const comTransito=ROWS.filter(r=>String(r.transito||'').trim().toLowerCase()==='sim').length;
+  const comHist=ROWS.filter(r=>r.hist&&String(r.hist).length>15).length;
   const rodou=verificados.length>0 || comMov.length>0;
   const tsV=ROWS.map(r=>mapParseData(r.ultVerif)).filter(Boolean); const ultVerifTs=tsV.length?Math.max(...tsV):0;
   document.getElementById('map-status').innerHTML = rodou
     ? '<div style="background:rgba(63,178,127,.10);border:1px solid rgba(63,178,127,.42);color:#9fe7c0;border-radius:10px;padding:12px 16px;font-size:13px;font-weight:600">● Agente operacional — '+fmtI.format(Math.max(verificados.length,comMov.length))+' processo(s) verificado(s)'+(ultVerifTs?(' · última verificação '+new Date(ultVerifTs).toLocaleDateString("pt-BR")):'')+'.</div>'
-    : '<div style="background:rgba(216,167,42,.10);border:1px solid rgba(216,167,42,.42);color:#eccf86;border-radius:10px;padding:12px 16px;font-size:13px">○ Agente ainda não executado nesta planilha. Conectores testados e prontos (DATAJUD + DJEN). Rode <b>instalarAgente</b> e <b>verificarAgora</b> no Apps Script — as colunas AA–AE de «Todos os Processos» serão preenchidas.</div>';
+    : '<div style="background:rgba(216,167,42,.10);border:1px solid rgba(216,167,42,.42);color:#eccf86;border-radius:10px;padding:12px 16px;font-size:13px">○ Agente ainda não executado nesta planilha. Conectores testados e prontos (DATAJUD + DJEN). Rode o agente no Apps Script (menu 🤖 Agente BM) — as colunas de verificação, movimentação e histórico de «Todos os Processos» serão preenchidas.</div>';
   document.getElementById('map-meta').textContent = rodou ? 'operacional · lido ao vivo' : 'aguardando 1ª execução';
   document.getElementById('map-kpis').innerHTML=
     kpiMini('Processos ativos',fmtI.format(ativos.length))+kpiMini('Verificados pelo agente',fmtI.format(verificados.length))+
-    kpiMini('Com última movimentação',fmtI.format(comMov.length))+kpiMini('Decisões com íntegra',fmtI.format(comInteg.length));
+    kpiMini('Com última movimentação',fmtI.format(comMov.length))+kpiMini('Decisões com íntegra',fmtI.format(comInteg.length))+
+    kpiMini('Trânsito em julgado',fmtI.format(comTransito))+kpiMini('Com histórico de andamentos',fmtI.format(comHist));
   const semMov=rodou?ativos.filter(r=>!(r.ultMov||r.ultMovData)).length:ativos.length;
   document.getElementById('map-health').innerHTML=
     healthRow('DATAJUD (CNJ) — api_publica_&lt;alias&gt;/_search','Chave pública oficial do CNJ · alias derivado do número CNJ (J+TR) · validado jun/2026.','ok')+
@@ -1504,15 +1508,17 @@ function renderMapeamento(){
   const PG=25, total=rows.length, pages=Math.max(1,Math.ceil(total/PG));
   if(mapPage>=pages) mapPage=pages-1;
   const pg=rows.slice(mapPage*PG,(mapPage+1)*PG);
-  let h='<table><thead><tr><th>Nº do processo</th><th>Cliente</th><th>Trib.</th><th>Status</th><th>Última movimentação</th><th>Data</th><th>Decisão</th></tr></thead><tbody>';
+  let h='<table><thead><tr><th>Nº do processo</th><th>Cliente</th><th>Trib.</th><th>Status</th><th>Última movimentação</th><th>Data</th><th>Trânsito</th><th>Detalhe</th></tr></thead><tbody>';
   pg.forEach(r=>{ const cli=((r.autor||'').split('|')[0].trim()||(r.reuRaw||'').split('|')[0].trim());
-    const temTexto=r.ultTeor||r.intLim||r.intSent||r.intAc;
+    const temTexto=r.ultTeor||r.intLim||r.intSent||r.intAc||r.hist;
+    const tj=String(r.transito||'').trim().toLowerCase()==='sim';
     h+='<tr'+(temTexto?' style="cursor:pointer" onclick="showProcDecisao(\''+String(r.num||'').replace(/\D/g,'')+'\')"':'')+'>'+
       '<td style="font-family:monospace;font-size:11px">'+escapeHtml(r.num||'—')+'</td>'+
       '<td title="'+escapeHtml(cli)+'">'+escapeHtml(cli.length>26?cli.slice(0,24)+'…':cli)+'</td><td>'+escapeHtml(r.trib)+'</td><td>'+pill(r.status)+'</td>'+
       '<td>'+(r.ultMov?escapeHtml(r.ultMov):'<span style="color:var(--text-muted)">—</span>')+'</td><td class="dim">'+escapeHtml(r.ultMovData||'—')+'</td>'+
-      '<td>'+(temTexto?'<span class="pill p-blue">ver teor</span>':'<span style="color:var(--text-muted)">—</span>')+'</td></tr>'; });
-  if(!pg.length) h+='<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text-sub)">Sem movimentações registradas ainda — o agente preenche as colunas de «Todos os Processos» na verificação diária.</td></tr>';
+      '<td>'+(tj?'<span class="pill p-green">⚖ Sim</span>':'<span style="color:var(--text-muted)">—</span>')+'</td>'+
+      '<td>'+(temTexto?'<span class="pill p-blue">ver</span>':'<span style="color:var(--text-muted)">—</span>')+'</td></tr>'; });
+  if(!pg.length) h+='<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--text-sub)">Sem movimentações registradas ainda — o agente preenche as colunas de «Todos os Processos» na verificação diária.</td></tr>';
   h+='</tbody></table>';
   document.getElementById('map-table').innerHTML=h;
   document.getElementById('map-info').textContent=fmtI.format(total)+' processos';
@@ -1526,11 +1532,14 @@ function renderMapeamento(){
 function showProcDecisao(numDigits){
   const r=ROWS.find(x=>String(x.num||'').replace(/\D/g,'')===numDigits); if(!r) return;
   const cli=(r.autor||'').split('|')[0].trim();
-  document.getElementById('modal-titulo').textContent='Decisões — '+(r.num||'')+(cli?(' · '+cli):'');
+  document.getElementById('modal-titulo').textContent='Movimentações — '+(r.num||'')+(cli?(' · '+cli):'');
   const sec=(tit,txt)=> txt?('<div style="margin:6px 0 16px"><div style="font-size:11px;font-weight:700;color:var(--primary-mid);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">'+tit+'</div><div style="font-size:12.5px;line-height:1.65;white-space:pre-wrap;color:var(--text-main)">'+escapeHtml(String(txt))+'</div></div>'):'';
-  let h=sec('Última movimentação'+(r.ultMovData?(' — '+r.ultMovData):''), r.ultMov?(r.ultMov+(r.ultTeor?('\n\n'+r.ultTeor):'')):r.ultTeor)+
-        sec('Íntegra da liminar', r.intLim)+sec('Íntegra da sentença', r.intSent)+sec('Íntegra do acórdão', r.intAc);
-  if(!h) h='<div class="card-subtitle">Sem texto de decisão para este processo ainda.</div>';
+  const transito=(String(r.transito||'').trim().toLowerCase()==='sim') ? '<div style="margin:0 0 14px"><span class="pill p-green" style="font-size:12px">⚖ Trânsito em julgado</span></div>' : '';
+  let h=transito+
+        sec('Última movimentação'+(r.ultMovData?(' — '+r.ultMovData):''), r.ultMov?(r.ultMov+(r.ultTeor?('\n\n'+r.ultTeor):'')):r.ultTeor)+
+        sec('Íntegra da liminar', r.intLim)+sec('Íntegra da sentença', r.intSent)+sec('Íntegra do acórdão', r.intAc)+
+        sec('Histórico de movimentações', r.hist);
+  if(!h) h='<div class="card-subtitle">Sem movimentações registradas para este processo ainda.</div>';
   document.getElementById('modal-body').innerHTML=h;
   document.getElementById('proc-modal').classList.add('open');
 }

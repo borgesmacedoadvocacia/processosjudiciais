@@ -535,12 +535,23 @@
     <!-- ═══════════ VIEW: MAPEAMENTO DE PROCESSOS (AGENTE) ═══════════ -->
     <div id="view-mapeamento" style="display:none">
       <div class="readout" id="map-resumo">
-        <div class="readout-head"><div class="readout-title">Agente de Mapeamento de Processos</div>
+        <div class="readout-head"><div class="readout-title">Agente de Mapeamento — saúde da ferramenta</div>
         <div class="readout-meta" id="map-meta">—</div></div>
-        <div class="readout-narr">Robô que verifica diariamente (06h) os processos <b>ativos</b> via DATAJUD e DJEN, detecta movimentações relevantes (despacho, decisão, sentença, acórdão, ato ordinatório), atualiza a planilha e registra o histórico. Esta aba mostra a atividade do agente, lida ao vivo da aba «Mapeamento de Processos» da planilha.</div>
+        <div class="readout-narr">Robô que verifica diariamente (06h) os processos <b>ativos</b> via DATAJUD + DJEN, detecta movimentações relevantes (despacho, decisão, sentença, acórdão, ato ordinatório), grava o resultado nas colunas da aba «Todos os Processos» e mantém o histórico em OBSERVAÇÕES. Esta aba monitora se o agente está <b>funcionando</b> — conectores, última execução, cobertura das colunas e eventuais bloqueios. Não é canal de aviso ao cliente.</div>
       </div>
-      <div class="kpi-grid-4" id="map-kpis"></div>
+      <div id="map-status" style="margin-top:12px"></div>
+      <div class="kpi-grid-4" id="map-kpis" style="margin-top:12px"></div>
       <div class="card" style="margin-top:14px">
+        <div class="section-title" style="margin-top:0">Conectores &amp; diagnóstico</div>
+        <div id="map-health"></div>
+      </div>
+      <div class="card" style="margin-top:14px">
+        <div class="section-title" style="margin-top:0">Cobertura das colunas de «Todos os Processos» <span class="st-tag">ao vivo</span></div>
+        <div class="card-subtitle">Percentual de células preenchidas em cada coluna. As marcadas com <span style="color:var(--primary)">●</span> são alimentadas pelo agente.</div>
+        <div class="table-wrap" id="map-coverage"></div>
+      </div>
+      <div class="card" style="margin-top:14px">
+        <div class="section-title" style="margin-top:0">Atividade por processo</div>
         <div class="table-header-row">
           <input type="text" class="table-search" id="map-search" placeholder="Buscar por processo, cliente, tribunal, tipo de movimentação…">
           <span class="pag-info" id="map-info"></span>
@@ -666,6 +677,7 @@ async function loadData(){
     const gs=(c,label)=>{ const v=gv(c,label); return (v==null||String(v).trim()==='')?null:String(v).trim(); };
     const gnum=(c,label)=>{ const v=gv(c,label); if(typeof v==='number') return v; if(v==null) return null; const n=parseFloat(String(v).replace(/[^\d.-]/g,'')); return isNaN(n)?null:n; };
     const gyearDate=(c,label)=>{ const i=ci[label]; if(i===undefined||!c[i]) return null; const v=c[i].v; const m=String(v).match(/Date\((\d+),/); return m?parseInt(m[1],10):null; };
+    const gsf=(c,label)=>{ const i=ci[label]; if(i===undefined||!c[i]) return null; const cell=c[i]; const v=(cell.f!=null&&String(cell.f).trim()!=='')?cell.f:cell.v; return (v==null||String(v).trim()==='')?null:String(v).trim(); };
 
     ROWS=rows.map(row=>{
       const c=row.c||[];
@@ -690,10 +702,12 @@ async function loadData(){
         ano, valor:(valorRaw!=null&&valorRaw>0.001)?valorRaw:(valorRaw===0?0:null),
         receber:recRaw, polo:polo(num),
         intLim:gs(c,'ÍNTEGRA DA LIMINAR'), intSent:gs(c,'ÍNTEGRA DA SENTENÇA'), intAc:gs(c,'ÍNTEGRA DO ACÓRDÃO'),
-        ultMov:gs(c,'ÚLTIMA MOVIMENTAÇÃO DO PROCESSO'), ultMovData:gs(c,'DATA DA ÚLTIMA MOVIMENTAÇÃO DO PROCESSO'),
-        ultTeor:gs(c,'INTEIRO TEOR DA ÚLTIMA MOVIMENTAÇÃO DO PROCESSO')
+        ultMov:gs(c,'ÚLTIMA MOVIMENTAÇÃO DO PROCESSO'), ultMovData:gsf(c,'DATA DA ÚLTIMA MOVIMENTAÇÃO DO PROCESSO'),
+        ultTeor:gs(c,'INTEIRO TEOR DA ÚLTIMA MOVIMENTAÇÃO DO PROCESSO'),
+        ultVerif:gsf(c,'DATA DA ÚLTIMA VERIFICAÇÃO'), mapPor:gs(c,'MAPEADO POR')
       };
     }).filter(Boolean);
+    COVERAGE=computeCoverage(cols,rows,ci);
 
     buildReuGroups();
     populateFilters();
@@ -1423,20 +1437,68 @@ function renderTribTable(){ const m=new Map(); FILTERED.forEach(r=>{ if(r.trib==
 /* ════════════ MAPEAMENTO DE PROCESSOS (lê de "Todos os Processos") ════════════ */
 let mapPage=0, mapSearch='';
 function kpiMini(label,val){ return '<div class="kpi-card c-gold"><div class="kpi-label">'+label+'</div><div class="kpi-value" style="font-size:19px">'+escapeHtml(val)+'</div></div>'; }
-function mapParseData(s){ if(!s) return 0; const m=String(s).match(/(\d{2})\/(\d{2})\/(\d{4})/); if(m) return new Date(+m[3],+m[2]-1,+m[1]).getTime(); const d=new Date(s); return isNaN(d)?0:d.getTime(); }
+function mapParseData(s){ if(!s) return 0; s=String(s);
+  let m=s.match(/Date\((\d+),(\d+),(\d+)/); if(m) return new Date(+m[1],+m[2],+m[3]).getTime();
+  m=s.match(/(\d{2})\/(\d{2})\/(\d{4})/); if(m) return new Date(+m[3],+m[2]-1,+m[1]).getTime();
+  const d=new Date(s); return isNaN(d)?0:d.getTime(); }
+let COVERAGE=[];
+const AGENT_COLS=new Set(['MAPEADO POR','DATA DA ÚLTIMA VERIFICAÇÃO','DATA DA ÚLTIMA MOVIMENTAÇÃO DO PROCESSO','ÚLTIMA MOVIMENTAÇÃO DO PROCESSO','INTEIRO TEOR DA ÚLTIMA MOVIMENTAÇÃO DO PROCESSO','ÍNTEGRA DA LIMINAR','ÍNTEGRA DA SENTENÇA','ÍNTEGRA DO ACÓRDÃO','RESULTADO DA LIMINAR','RESULTADO DE SENTENÇA','RESULTADO DO RECURSO','FASE PROCESSUAL','OBSERVAÇÕES']);
+function colLetterJS(n){ let s=''; n+=1; while(n>0){ const r=(n-1)%26; s=String.fromCharCode(65+r)+s; n=Math.floor((n-1)/26); } return s; }
+function computeCoverage(cols,rows,ci){
+  const numI=ci['Nº DO PROCESSO'], stI=ci['STATUS DO PROCESSO'];
+  const cv=cell=> !!(cell && cell.v!=null && String(cell.v).trim()!=='');
+  const real=rows.filter(r=>{ const c=r.c||[]; return numI!=null && cv(c[numI]); });
+  const ativ=real.filter(r=>{ const c=r.c||[]; return stI!=null && c[stI] && String(c[stI].v).trim()==='Ativo'; });
+  return cols.map((col,i)=>{ const label=(col.label||'').trim(); if(!label) return null;
+    let fill=0,fillA=0;
+    real.forEach(r=>{ if(cv((r.c||[])[i])) fill++; });
+    ativ.forEach(r=>{ if(cv((r.c||[])[i])) fillA++; });
+    return {letter:colLetterJS(i),label,fill,total:real.length,fillA,totalA:ativ.length,pct:real.length?100*fill/real.length:0,pctA:ativ.length?100*fillA/ativ.length:0};
+  }).filter(Boolean);
+}
+function healthDot(st){ return st==='ok'?'#3fb27f':st==='wait'?'#d8a72a':'#d0524f'; }
+function healthRow(t,d,st){ return '<div style="display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-bottom:1px solid var(--border)"><span style="width:9px;height:9px;border-radius:50%;background:'+healthDot(st)+';margin-top:5px;flex:none"></span><div><div style="font-weight:600;color:var(--text-main);font-size:12.5px">'+t+'</div><div style="font-size:11.5px;color:var(--text-sub);margin-top:2px">'+d+'</div></div></div>'; }
+function renderCobertura(){
+  const el=document.getElementById('map-coverage'); if(!el) return;
+  if(!COVERAGE.length){ el.innerHTML='<div class="card-subtitle">—</div>'; return; }
+  const colorOf=p=>p>=90?'#3fb27f':p>=50?'#d8a72a':p>0?'#d0524f':'#5a6b86';
+  const bar=(p,col)=>'<span style="display:inline-block;vertical-align:middle;background:var(--bg-deep);border-radius:5px;height:8px;width:110px;overflow:hidden"><span style="display:block;height:100%;width:'+Math.max(p>0?3:0,Math.round(p))+'%;background:'+col+'"></span></span>';
+  let h='<table><thead><tr><th style="text-align:left">Col</th><th style="text-align:left">Coluna</th><th>Preench.</th><th></th><th>% ativos</th></tr></thead><tbody>';
+  COVERAGE.forEach(c=>{ const ag=AGENT_COLS.has(c.label.toUpperCase()); const col=colorOf(c.pct);
+    h+='<tr><td style="font-family:monospace;color:var(--text-sub)">'+c.letter+'</td>'+
+       '<td>'+(ag?'<span title="alimentada pelo agente" style="color:var(--primary)">●</span> ':'')+escapeHtml(c.label)+'</td>'+
+       '<td style="text-align:center;color:'+col+';font-weight:700">'+c.pct.toFixed(0)+'%</td>'+
+       '<td style="text-align:center">'+bar(c.pct,col)+'</td>'+
+       '<td style="text-align:center;color:var(--text-sub)">'+c.pctA.toFixed(0)+'%</td></tr>'; });
+  h+='</tbody></table>';
+  el.innerHTML=h;
+}
 function loadMapeamento(){
   const sb=document.getElementById('map-search'); if(sb) sb.oninput=e=>{ mapSearch=e.target.value.toLowerCase(); mapPage=0; renderMapeamento(); };
   mapPage=0; renderMapeamento();
 }
 function renderMapeamento(){
-  const comMov=ROWS.filter(r=>r.ultMov||r.ultMovData||r.ultTeor);
   const ativos=ROWS.filter(r=>r.status==='Ativo');
+  const verificados=ROWS.filter(r=>r.ultVerif);
+  const comMov=ROWS.filter(r=>r.ultMov||r.ultMovData||r.ultTeor);
   const comInteg=ROWS.filter(r=>r.intLim||r.intSent||r.intAc);
-  const agora=Date.now(); const recentes=comMov.filter(r=>{ const t=mapParseData(r.ultMovData); return t && (agora-t)<=30*864e5; });
+  const rodou=verificados.length>0 || comMov.length>0;
+  const tsV=ROWS.map(r=>mapParseData(r.ultVerif)).filter(Boolean); const ultVerifTs=tsV.length?Math.max(...tsV):0;
+  document.getElementById('map-status').innerHTML = rodou
+    ? '<div style="background:rgba(63,178,127,.10);border:1px solid rgba(63,178,127,.42);color:#9fe7c0;border-radius:10px;padding:12px 16px;font-size:13px;font-weight:600">● Agente operacional — '+fmtI.format(Math.max(verificados.length,comMov.length))+' processo(s) verificado(s)'+(ultVerifTs?(' · última verificação '+new Date(ultVerifTs).toLocaleDateString("pt-BR")):'')+'.</div>'
+    : '<div style="background:rgba(216,167,42,.10);border:1px solid rgba(216,167,42,.42);color:#eccf86;border-radius:10px;padding:12px 16px;font-size:13px">○ Agente ainda não executado nesta planilha. Conectores testados e prontos (DATAJUD + DJEN). Rode <b>instalarAgente</b> e <b>verificarAgora</b> no Apps Script — as colunas AA–AE de «Todos os Processos» serão preenchidas.</div>';
+  document.getElementById('map-meta').textContent = rodou ? 'operacional · lido ao vivo' : 'aguardando 1ª execução';
   document.getElementById('map-kpis').innerHTML=
-    kpiMini('Processos ativos',fmtI.format(ativos.length))+kpiMini('Com última movimentação',fmtI.format(comMov.length))+
-    kpiMini('Movimentações (30 dias)',fmtI.format(recentes.length))+kpiMini('Decisões com íntegra',fmtI.format(comInteg.length));
-  document.getElementById('map-meta').textContent=comMov.length?(fmtI.format(comMov.length)+' processos com movimentação registrada pelo agente · lido ao vivo'):'aguardando a primeira verificação do agente';
+    kpiMini('Processos ativos',fmtI.format(ativos.length))+kpiMini('Verificados pelo agente',fmtI.format(verificados.length))+
+    kpiMini('Com última movimentação',fmtI.format(comMov.length))+kpiMini('Decisões com íntegra',fmtI.format(comInteg.length));
+  const semMov=rodou?ativos.filter(r=>!(r.ultMov||r.ultMovData)).length:ativos.length;
+  document.getElementById('map-health').innerHTML=
+    healthRow('DATAJUD (CNJ) — api_publica_&lt;alias&gt;/_search','Chave pública oficial do CNJ · alias derivado do número CNJ (J+TR) · validado jun/2026.','ok')+
+    healthRow('DJEN / PJe — comunicaapi.pje.jus.br','Sem autenticação · inteiro teor das publicações (janela 180 dias) · validado jun/2026.','ok')+
+    healthRow('Gatilho diário 06h', rodou?'Ativo — verifica automaticamente os processos ativos.':'Criado ao rodar instalarAgente (ScriptApp · everyDays · atHour 6).', rodou?'ok':'wait')+
+    healthRow('Processamento em lote','Continuação automática a cada ~1 min (limite Apps Script de 6 min) · '+fmtI.format(ativos.length)+' ativos por verificação.','ok')+
+    healthRow('Pendências / bloqueios', rodou?(semMov>0?(fmtI.format(semMov)+' ativo(s) ainda sem movimentação localizada — re-tentados no próximo ciclo.'):'Nenhum bloqueio detectado.'):'DJEN tem limite de taxa (HTTP 429) → o agente reexecuta com backoff automático.', (rodou&&semMov===0)?'ok':'wait');
+  renderCobertura();
   let rows=(comMov.length?comMov:ativos).slice().sort((a,b)=>mapParseData(b.ultMovData)-mapParseData(a.ultMovData));
   if(mapSearch){ const q=mapSearch; rows=rows.filter(r=>[r.num,r.autor,r.reuRaw,r.trib,r.ultMov,r.prod].some(v=>String(v||'').toLowerCase().includes(q))); }
   const PG=25, total=rows.length, pages=Math.max(1,Math.ceil(total/PG));

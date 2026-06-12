@@ -16,7 +16,17 @@ Não há dados congelados no repositório.
 
 ### Métricas
 Êxito sob a ótica do cliente, deferimento de liminar, reforma em 2º grau, taxa de acordo,
-distribuição por estado/tribunal/ano, status, fase, aging, mapa de êxito produto × UF,
-desempenho por produto/UF/litigante e drill-down de todos os processos.
+pendências (de julgamento, de recurso, de liminar), distribuição por estado/tribunal/ano,
+status, fase, aging, cascata processual, mapa de êxito produto × UF, desempenho por
+produto/UF/litigante, intervalos de confiança de Wilson e drill-down de todos os processos.
+
+### Consultor IA
+A aba **Consultor IA** responde perguntas objetivas sobre os dados (ex.: "quantas ações de
+revisional de plano de saúde estão ativas e ainda sem alvará creditado?"). O Claude interpreta
+a pergunta e o navegador calcula a contagem exata na base — números nunca são estimados.
+
+- Requer uma **chave da API do Claude** (console.anthropic.com), inserida pelo próprio usuário
+  e guardada **apenas no navegador** (localStorage). A chave **nunca** é versionada no repositório.
+- A conexão usa o endpoint `/v1/messages` com tool use, direto do navegador.
 
 > Documento interno de gestão.

@@ -237,6 +237,20 @@
   .ddbar{height:6px;background:var(--border);border-radius:3px;overflow:hidden;}
   .ddbar span{display:block;height:100%;background:var(--primary-mid);border-radius:3px;}
 
+  /* DRILL-DOWN (clicar na métrica) */
+  .kpi-card.clickable,.ddstat.clickable{cursor:pointer;}
+  .kpi-card.clickable:hover,.ddstat.clickable:hover{border-color:var(--primary-mid);box-shadow:var(--shadow-md);}
+  .kpi-card.clickable::before{content:'ver lista';position:absolute;top:10px;right:12px;font-size:8.5px;letter-spacing:.5px;text-transform:uppercase;color:var(--text-muted);opacity:0;transition:opacity .15s;}
+  .kpi-card.clickable:hover::before{opacity:1;}
+  .modal-bg{position:fixed;inset:0;background:rgba(3,8,20,.72);display:none;align-items:center;justify-content:center;z-index:300;padding:20px;}
+  .modal-bg.open{display:flex;}
+  .modal-box{background:var(--card);border:1px solid var(--border);border-radius:14px;max-width:1000px;width:100%;max-height:86vh;display:flex;flex-direction:column;box-shadow:var(--shadow-md);}
+  .modal-h{display:flex;align-items:center;justify-content:space-between;padding:15px 20px;border-bottom:1px solid var(--border);}
+  .modal-h .t{font-size:14px;font-weight:700;color:#fff;}
+  .modal-x{background:none;border:none;color:var(--text-sub);font-size:20px;cursor:pointer;line-height:1;padding:0 4px;}
+  .modal-x:hover{color:var(--text-main);}
+  .modal-body{overflow:auto;padding:6px 20px 18px;}
+
   /* CASCATA PROCESSUAL */
   .cascade{display:flex;gap:8px;flex-wrap:wrap;}
   .casc-stage{flex:1;min-width:124px;background:var(--card2);border:1px solid var(--border);border-radius:9px;padding:12px 14px;}
@@ -281,6 +295,7 @@
     <div class="tab-bar" id="tab-bar">
       <button class="tab active" data-view="painel" type="button" onclick="switchView('painel')">Painel de Controladoria</button>
       <button class="tab" data-view="consultor" type="button" onclick="switchView('consultor')">Consultor IA</button>
+      <button class="tab" data-view="mapeamento" type="button" onclick="switchView('mapeamento')">Mapeamento de Processos</button>
     </div>
 
     <div id="view-painel">
@@ -517,6 +532,32 @@
       </div>
     </div>
 
+    <!-- ═══════════ VIEW: MAPEAMENTO DE PROCESSOS (AGENTE) ═══════════ -->
+    <div id="view-mapeamento" style="display:none">
+      <div class="readout" id="map-resumo">
+        <div class="readout-head"><div class="readout-title">Agente de Mapeamento de Processos</div>
+        <div class="readout-meta" id="map-meta">—</div></div>
+        <div class="readout-narr">Robô que verifica diariamente (06h) os processos <b>ativos</b> via DATAJUD e DJEN, detecta movimentações relevantes (despacho, decisão, sentença, acórdão, ato ordinatório), atualiza a planilha e registra o histórico. Esta aba mostra a atividade do agente, lida ao vivo da aba «Mapeamento de Processos» da planilha.</div>
+      </div>
+      <div class="kpi-grid-4" id="map-kpis"></div>
+      <div class="card" style="margin-top:14px">
+        <div class="table-header-row">
+          <input type="text" class="table-search" id="map-search" placeholder="Buscar por processo, cliente, tribunal, tipo de movimentação…">
+          <span class="pag-info" id="map-info"></span>
+        </div>
+        <div class="table-wrap" id="map-table"></div>
+        <div class="pagination"><span class="pag-info" id="map-page-info"></span><div class="pag-btns" id="map-pager"></div></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- MODAL DRILL-DOWN -->
+<div class="modal-bg" id="proc-modal" onclick="if(event.target===this)fecharModal()">
+  <div class="modal-box">
+    <div class="modal-h"><span class="t" id="modal-titulo">Processos</span><button class="modal-x" type="button" onclick="fecharModal()">✕</button></div>
+    <div class="modal-body" id="modal-body"></div>
   </div>
 </div>
 
@@ -647,7 +688,10 @@ async function loadData(){
         rec:gs(c,'RESULTADO DO RECURSO')||'Não Informado',
         alv:gs(c,'SITUAÇÃO DO ALVARÁ')||'ND',
         ano, valor:(valorRaw!=null&&valorRaw>0.001)?valorRaw:(valorRaw===0?0:null),
-        receber:recRaw, polo:polo(num)
+        receber:recRaw, polo:polo(num),
+        intLim:gs(c,'ÍNTEGRA DA LIMINAR'), intSent:gs(c,'ÍNTEGRA DA SENTENÇA'), intAc:gs(c,'ÍNTEGRA DO ACÓRDÃO'),
+        ultMov:gs(c,'ÚLTIMA MOVIMENTAÇÃO DO PROCESSO'), ultMovData:gs(c,'DATA DA ÚLTIMA MOVIMENTAÇÃO DO PROCESSO'),
+        ultTeor:gs(c,'INTEIRO TEOR DA ÚLTIMA MOVIMENTAÇÃO DO PROCESSO')
       };
     }).filter(Boolean);
 
@@ -655,6 +699,7 @@ async function loadData(){
     populateFilters();
     initCharts();
     recompute();
+    attachDrill();
 
     const now=new Date();
     document.getElementById('last-updated').textContent='Atualizado às '+now.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})+' · '+now.toLocaleDateString('pt-BR');
@@ -692,8 +737,10 @@ function switchView(view){
   document.querySelectorAll('#tab-bar .tab').forEach(t=>t.classList.toggle('active',t.dataset.view===view));
   document.getElementById('view-painel').style.display = view==='painel'?'block':'none';
   document.getElementById('view-consultor').style.display = view==='consultor'?'block':'none';
+  document.getElementById('view-mapeamento').style.display = view==='mapeamento'?'block':'none';
   syncStickies();
   if(view==='consultor'){ initConsultor(); setTimeout(()=>{ const i=document.getElementById('chat-input'); if(i) i.focus(); },60); }
+  if(view==='mapeamento') loadMapeamento();
 }
 
 /* ════════════ FILTROS ════════════ */
@@ -1169,6 +1216,43 @@ const CONSULTA_TOOL={
     agrupar_por:{type:'string',enum:['produto','uf','tribunal','status','fase','sistema','liminar','sentenca','recurso','alvara','polo','ano'],description:'Campo de agrupamento quando agregacao=distribuicao'}
   },required:[]}
 };
+const DECISAO_TOOL={
+  name:'ler_decisoes',
+  description:'Retorna o TEXTO INTEGRAL das decisões (liminar, sentença, acórdão) e da última movimentação de processos específicos, para você LER e responder sobre o CONTEÚDO/fundamentos. Use sempre que a pergunta for sobre o que foi decidido, o teor/fundamentação de uma sentença, liminar ou acórdão, o que dizem os autos, a última movimentação, etc. Filtre pelo número do processo (mais preciso) ou por outros campos.',
+  input_schema:{type:'object',properties:{
+    numero:{type:'string',description:'Número do processo ou parte dele (forma mais precisa)'},
+    produto:{type:'string',description:'Produto/tese, para localizar processos quando não há número'},
+    uf:{type:'string',description:'UF (2 letras)'},
+    status:{type:'string',description:'Status do processo'},
+    tipo_decisao:{type:'string',enum:['liminar','sentenca','acordao','ultima','todas'],description:'Qual texto ler (padrão: todas as disponíveis)'},
+    limite:{type:'integer',description:'Máximo de processos a retornar (padrão 3, máximo 8)'}
+  },required:[]}
+};
+function execDecisao(inp){
+  inp=inp||{};
+  const want=inp.tipo_decisao||'todas';
+  const has=r=> (r.intLim||r.intSent||r.intAc||r.ultTeor);
+  let rows=ROWS.filter(r=>{
+    if(inp.numero){ const q=String(inp.numero).replace(/\D/g,''); if(q && !String(r.num||'').replace(/\D/g,'').includes(q)) return false; }
+    if(inp.produto && !inc(r.prod,inp.produto)) return false;
+    if(inp.uf && nrm(r.uf)!==nrm(inp.uf)) return false;
+    if(inp.status && !inc(r.status,inp.status)) return false;
+    return has(r);
+  });
+  const lim=Math.min(Math.max(1,inp.limite||3),8);
+  const cut=(t)=>{ t=String(t||'').trim(); return t.length>7000?t.slice(0,7000)+' […texto truncado]':t; };
+  const out=rows.slice(0,lim).map(r=>{
+    const o={n_processo:r.num, cliente:(r.autor||'').split('|')[0].trim()||(r.reuRaw||'').split('|')[0].trim(), produto:r.prod, uf:r.uf, tribunal:r.trib, status:r.status,
+      resultado_liminar:r.lim, resultado_sentenca:r.sent, resultado_recurso:r.rec};
+    if((want==='todas'||want==='liminar')&&r.intLim) o.integra_liminar=cut(r.intLim);
+    if((want==='todas'||want==='sentenca')&&r.intSent) o.integra_sentenca=cut(r.intSent);
+    if((want==='todas'||want==='acordao')&&r.intAc) o.integra_acordao=cut(r.intAc);
+    if((want==='todas'||want==='ultima')&&(r.ultTeor||r.ultMov)){ o.ultima_movimentacao=r.ultMov; o.data_ultima_movimentacao=r.ultMovData; if(r.ultTeor) o.inteiro_teor_ultima=cut(r.ultTeor); }
+    return o;
+  });
+  return {encontrados:rows.length, retornados:out.length, processos:out,
+    aviso: rows.length===0?'Nenhum processo com texto de decisão disponível para esse filtro (o agente diário ainda pode não ter preenchido).':undefined};
+}
 
 function distinct(field){ return [...new Set(ROWS.map(r=>r[field]).filter(v=>v!=null&&v!==''))]; }
 function buildSystemPrompt(){
@@ -1195,7 +1279,9 @@ function buildSystemPrompt(){
     '- "Alvará não creditado / ainda não recebeu" → alvara_nao_creditado:true.',
     '- "Êxito do cliente" depende do polo: vitória = Procedência com cliente autor OU Improcedência com cliente réu; extinções e acordos não são mérito. Use exito_cliente para ganhar/perder.',
     '',
-    'Estilo: responda em português do Brasil, OBJETIVO e direto, começando pelo número/resultado, citando brevemente os filtros aplicados. Se a pergunta for ambígua, declare a suposição. Use distribuicao para "por estado/produto/ano". Não exponha raciocínio interno — apenas a resposta final, curta.'
+    'Você também pode LER as decisões. As colunas ÍNTEGRA DA LIMINAR, ÍNTEGRA DA SENTENÇA, ÍNTEGRA DO ACÓRDÃO e INTEIRO TEOR DA ÚLTIMA MOVIMENTAÇÃO trazem o texto integral. Para QUALQUER pergunta sobre o CONTEÚDO/fundamentos de uma decisão, o que o juiz decidiu, o teor de uma sentença/liminar/acórdão ou a última movimentação, use a ferramenta ler_decisoes (de preferência pelo número do processo) e responda com base no texto retornado, citando o processo. Não invente teor que não esteja no texto.',
+    '',
+    'Estilo: responda em português do Brasil, OBJETIVO e direto, começando pelo número/resultado, citando brevemente os filtros aplicados. Se a pergunta for ambígua, declare a suposição. Use distribuicao para "por estado/produto/ano". Para perguntas sobre conteúdo de decisões, resuma com precisão jurídica. Não exponha raciocínio interno — apenas a resposta final.'
   ].join('\n');
 }
 
@@ -1203,7 +1289,7 @@ async function callClaude(system,messages){
   const res=await fetch('https://api.anthropic.com/v1/messages',{
     method:'POST',
     headers:{'content-type':'application/json','x-api-key':getKey(),'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
-    body:JSON.stringify({model:CHAT_MODEL,max_tokens:1024,system:system,tools:[CONSULTA_TOOL],messages:messages})
+    body:JSON.stringify({model:CHAT_MODEL,max_tokens:1500,system:system,tools:[CONSULTA_TOOL,DECISAO_TOOL],messages:messages})
   });
   let data; try{ data=await res.json(); }catch(e){ throw new Error('Resposta inválida da API (HTTP '+res.status+')'); }
   if(!res.ok) throw new Error((data&&data.error&&data.error.message)||('HTTP '+res.status));
@@ -1217,7 +1303,7 @@ async function askConsultor(userText){
     chatMessages.push({role:'assistant',content:data.content});
     if(data.stop_reason==='tool_use'){
       const results=[];
-      for(const b of data.content){ if(b.type==='tool_use'){ let out; try{ out=execConsulta(b.input||{}); }catch(e){ out={erro:String(e.message||e)}; } results.push({type:'tool_result',tool_use_id:b.id,content:JSON.stringify(out)}); } }
+      for(const b of data.content){ if(b.type==='tool_use'){ let out; try{ out=(b.name==='ler_decisoes')?execDecisao(b.input||{}):execConsulta(b.input||{}); }catch(e){ out={erro:String(e.message||e)}; } results.push({type:'tool_result',tool_use_id:b.id,content:JSON.stringify(out)}); } }
       chatMessages.push({role:'user',content:results});
       continue;
     }
@@ -1328,11 +1414,100 @@ function renderTipo(){
   const tot=ROWS.length, col={'Processo Principal':'c-blue','Recurso':'c-gold','Processo Incidental':'c-orange'};
   let h='<div class="ddgrid" style="grid-template-columns:repeat(auto-fit,minmax(165px,1fr))">';
   types.forEach(t=>{ const g=ROWS.filter(r=>r.tipo===t), at=g.filter(r=>r.status==='Ativo').length, w=g.filter(isWin).length, l=g.filter(isLoss).length;
-    h+='<div class="ddstat '+(col[t]||'')+'"><div class="l">'+escapeHtml(t)+'</div><div class="v">'+fmtI.format(g.length)+'</div><div class="s">'+pctTxt(g.length,tot)+' da base · '+fmtI.format(at)+' ativos'+(w+l>=8?' · êxito '+pctTxt(w,w+l):'')+'</div></div>'; });
+    h+='<div class="ddstat clickable '+(col[t]||'')+'" data-t="'+escapeHtml(t)+'" onclick="showTipoProcessos(this.dataset.t)"><div class="l">'+escapeHtml(t)+'</div><div class="v">'+fmtI.format(g.length)+'</div><div class="s">'+pctTxt(g.length,tot)+' da base · '+fmtI.format(at)+' ativos'+(w+l>=8?' · êxito '+pctTxt(w,w+l):'')+'</div></div>'; });
   h+='</div>';
   document.getElementById('dd-tipo').innerHTML=h;
 }
 function renderTribTable(){ const m=new Map(); FILTERED.forEach(r=>{ if(r.trib==='ND')return; if(!m.has(r.trib))m.set(r.trib,[]); m.get(r.trib).push(r); }); renderStatTable('t-trib','Tribunal',[...m.entries()].filter(e=>e[1].length>=3)); }
+
+/* ════════════ MAPEAMENTO DE PROCESSOS (LOG DO AGENTE) ════════════ */
+let mapRows=[], mapPage=0, mapSearch='';
+function kpiMini(label,val){ return '<div class="kpi-card c-gold"><div class="kpi-label">'+label+'</div><div class="kpi-value" style="font-size:19px">'+escapeHtml(val)+'</div></div>'; }
+async function loadMapeamento(){
+  const el=document.getElementById('map-table');
+  const sb=document.getElementById('map-search'); if(sb) sb.oninput=e=>{ mapSearch=e.target.value.toLowerCase(); mapPage=0; renderMapeamento(); };
+  el.innerHTML='<div class="card-subtitle">Carregando atividade do agente…</div>';
+  try{
+    const url=`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent('Mapeamento de Processos')}&_cb=${Date.now()}`;
+    const res=await fetch(url,{cache:'no-store'});
+    const text=await res.text();
+    if(/exception|error|invalid/i.test(text)&&text.indexOf('{')<0) throw new Error('aba inexistente');
+    const json=JSON.parse(text.substring(text.indexOf('{'),text.lastIndexOf('}')+1));
+    const cols=(json.table.cols||[]).map(c=>(c.label||'').trim());
+    mapRows=(json.table.rows||[]).map(r=>{ const c=r.c||[]; const o={}; cols.forEach((lab,i)=>{ o[lab]=c[i]?(c[i].f!=null?c[i].f:c[i].v):''; }); return o; })
+      .filter(o=>Object.values(o).some(v=>v!==''&&v!=null));
+    mapPage=0; renderMapeamento();
+  }catch(e){
+    mapRows=[];
+    el.innerHTML='<div class="card-subtitle" style="padding:14px 0">A aba «Mapeamento de Processos» ainda não foi criada. Ela aparece automaticamente quando você instala e roda o agente (Apps Script). Assim que ele executar a primeira verificação, a atividade diária é listada aqui ao vivo.</div>';
+    document.getElementById('map-meta').textContent='agente ainda não executado';
+    document.getElementById('map-kpis').innerHTML='';
+    document.getElementById('map-info').textContent=''; document.getElementById('map-page-info').textContent=''; document.getElementById('map-pager').innerHTML='';
+  }
+}
+function renderMapeamento(){
+  const ativ=mapRows.filter(o=>{ const d=String(o['Data/Hora']||''); return d && !d.startsWith('—'); });
+  const totReg=ativ.length, notif=ativ.filter(o=>String(o['Cliente Notificado']||'').toLowerCase()==='sim').length;
+  const tipos=new Set(ativ.map(o=>o['Tipo de Movimentação']).filter(Boolean)).size;
+  const ultima=ativ.length?String(ativ[ativ.length-1]['Data/Hora']):'—';
+  document.getElementById('map-kpis').innerHTML=kpiMini('Movimentações registradas',fmtI.format(totReg))+kpiMini('Clientes notificados',fmtI.format(notif))+kpiMini('Tipos de movimentação',fmtI.format(tipos))+kpiMini('Último registro',ultima);
+  document.getElementById('map-meta').textContent=totReg?(fmtI.format(totReg)+' registros · lido ao vivo da planilha'):'sem registros ainda';
+  let rows=ativ.slice().reverse();
+  if(mapSearch){ const q=mapSearch; rows=rows.filter(o=>Object.values(o).some(v=>String(v).toLowerCase().includes(q))); }
+  const PG=25, total=rows.length, pages=Math.max(1,Math.ceil(total/PG));
+  if(mapPage>=pages) mapPage=pages-1;
+  const pg=rows.slice(mapPage*PG,(mapPage+1)*PG);
+  const cols=['Data/Hora','Nº do Processo','Cliente','Tribunal','Tipo de Movimentação','Resumo da Atualização','Cliente Notificado'];
+  let h='<table><thead><tr>'+cols.map(c=>'<th>'+c+'</th>').join('')+'</tr></thead><tbody>';
+  pg.forEach(o=>{ h+='<tr>'+cols.map((c,i)=>{ let v=escapeHtml(String(o[c]==null?'':o[c]));
+    if(i<=1) v='<span class="mono" style="font-size:11px">'+v+'</span>';
+    if(c==='Cliente Notificado') v=String(o[c]).toLowerCase()==='sim'?'<span class="pill p-green">Sim</span>':'<span class="pill p-slate">—</span>';
+    return '<td'+(c==='Resumo da Atualização'?' style="white-space:normal;max-width:340px"':'')+'>'+v+'</td>'; }).join('')+'</tr>'; });
+  if(!pg.length) h+='<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text-sub)">Nenhuma atividade ainda — o agente preenche aqui a cada verificação diária.</td></tr>';
+  h+='</tbody></table>';
+  document.getElementById('map-table').innerHTML=h;
+  document.getElementById('map-info').textContent=fmtI.format(total)+' registros';
+  document.getElementById('map-page-info').textContent='Exibindo '+(total?mapPage*PG+1:0)+'–'+Math.min((mapPage+1)*PG,total)+' de '+fmtI.format(total);
+  const pgr=document.getElementById('map-pager'); pgr.innerHTML='';
+  const mk=(t,dis,fn)=>{const b=document.createElement('button');b.className='pag-btn';b.textContent=t;b.disabled=dis;b.onclick=fn;return b;};
+  pgr.appendChild(mk('‹',mapPage===0,()=>{mapPage--;renderMapeamento();}));
+  const l=document.createElement('span');l.className='pag-info';l.style.padding='0 8px';l.textContent=(mapPage+1)+' / '+pages;pgr.appendChild(l);
+  pgr.appendChild(mk('›',mapPage>=pages-1,()=>{mapPage++;renderMapeamento();}));
+}
+
+/* ════════════ DRILL-DOWN (clicar na métrica → lista) ════════════ */
+function showProcModal(titulo, rows){
+  document.getElementById('modal-titulo').textContent=titulo+' — '+fmtI.format(rows.length)+' processo(s)';
+  let h='<table><thead><tr><th>Nº do processo</th><th>Produto</th><th>UF</th><th>Trib.</th><th>Status</th><th>Sentença</th><th>Recurso</th><th>Valor da causa</th></tr></thead><tbody>';
+  rows.slice(0,500).forEach(r=>{ h+='<tr><td style="font-family:monospace;font-size:11px">'+escapeHtml(r.num||'—')+'</td>'+
+    '<td title="'+escapeHtml(r.prod)+'">'+escapeHtml(r.prod.length>26?r.prod.slice(0,24)+'…':r.prod)+'</td><td>'+escapeHtml(r.uf)+'</td><td>'+escapeHtml(r.trib)+'</td>'+
+    '<td>'+pill(r.status)+'</td><td>'+pill(r.sent)+'</td><td>'+pill(r.rec)+'</td><td>'+(r.valor!=null?fmtMoney(r.valor):'—')+'</td></tr>'; });
+  if(rows.length>500) h+='<tr><td colspan="8" class="small" style="text-align:center;padding:10px;color:var(--text-sub)">… e mais '+fmtI.format(rows.length-500)+' (refine pelos filtros do painel)</td></tr>';
+  if(!rows.length) h+='<tr><td colspan="8" style="text-align:center;padding:18px;color:var(--text-sub)">Nenhum processo nesta métrica.</td></tr>';
+  h+='</tbody></table>';
+  document.getElementById('modal-body').innerHTML=h;
+  document.getElementById('proc-modal').classList.add('open');
+}
+function fecharModal(){ document.getElementById('proc-modal').classList.remove('open'); }
+document.addEventListener('keydown',e=>{ if(e.key==='Escape') fecharModal(); });
+function showTipoProcessos(t){ showProcModal('Tipo de processo: '+t, ROWS.filter(r=>r.tipo===t)); }
+const DRILL={
+  'k-total':['Carteira na seleção', f=>f],
+  'k-ativos':['Processos ativos', f=>f.filter(r=>r.status==='Ativo')],
+  'k-valor':['Valor em carteira ativa', f=>f.filter(r=>r.status==='Ativo'&&r.valor&&r.valor>0.01)],
+  'k-receber':['A receber (alvarás não creditados)', f=>f.filter(r=>r.receber&&r.receber>0&&r.alv!=='Creditado')],
+  'k-exito':['Méritos julgados (procedência/improcedência)', f=>f.filter(r=>isWin(r)||isLoss(r))],
+  'k-lim':['Liminares apreciadas (concedidas/negadas)', f=>f.filter(r=>r.lim==='Liminar Concedida'||r.lim==='Liminar Negada')],
+  'k-rec':['Recursos julgados (provido/não provido)', f=>f.filter(r=>r.rec==='Provido'||r.rec==='Não Provido')],
+  'k-acordo':['Acordos homologados', f=>f.filter(r=>r.sent==='Acordo Homologado')],
+  'k-pjulg':['Pendentes de julgamento (aguardando sentença)', f=>f.filter(r=>r.sent==='Não Sentenciado')],
+  'k-prec':['Pendentes de recurso (aguardando 2º grau)', f=>f.filter(r=>r.rec==='Aguardando Julgamento')],
+  'k-plim':['Liminar aguardando apreciação', f=>f.filter(r=>r.lim==='Aguardando Julgamento')],
+};
+function attachDrill(){
+  Object.keys(DRILL).forEach(id=>{ const v=document.getElementById(id); if(!v) return; const card=v.closest('.kpi-card'); if(!card||card._drill) return;
+    card._drill=true; card.classList.add('clickable'); card.onclick=()=>{ const d=DRILL[id]; showProcModal(d[0], d[1](FILTERED)); }; });
+}
 
 /* ════════════ PIPELINE ════════════ */
 function recompute(){ FILTERED=ROWS.filter(pass); renderReadout(); renderKPIs(); renderTipo(); renderCascade(); updateCharts(); renderMatriz(); renderProdTable(); renderUfTable(); renderTribTable(); renderHeatmap(); renderReusTable(); renderDeepDive(); renderDetail(); }

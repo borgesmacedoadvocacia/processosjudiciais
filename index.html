@@ -1420,59 +1420,57 @@ function renderTipo(){
 }
 function renderTribTable(){ const m=new Map(); FILTERED.forEach(r=>{ if(r.trib==='ND')return; if(!m.has(r.trib))m.set(r.trib,[]); m.get(r.trib).push(r); }); renderStatTable('t-trib','Tribunal',[...m.entries()].filter(e=>e[1].length>=3)); }
 
-/* ════════════ MAPEAMENTO DE PROCESSOS (LOG DO AGENTE) ════════════ */
-let mapRows=[], mapPage=0, mapSearch='';
+/* ════════════ MAPEAMENTO DE PROCESSOS (lê de "Todos os Processos") ════════════ */
+let mapPage=0, mapSearch='';
 function kpiMini(label,val){ return '<div class="kpi-card c-gold"><div class="kpi-label">'+label+'</div><div class="kpi-value" style="font-size:19px">'+escapeHtml(val)+'</div></div>'; }
-async function loadMapeamento(){
-  const el=document.getElementById('map-table');
+function mapParseData(s){ if(!s) return 0; const m=String(s).match(/(\d{2})\/(\d{2})\/(\d{4})/); if(m) return new Date(+m[3],+m[2]-1,+m[1]).getTime(); const d=new Date(s); return isNaN(d)?0:d.getTime(); }
+function loadMapeamento(){
   const sb=document.getElementById('map-search'); if(sb) sb.oninput=e=>{ mapSearch=e.target.value.toLowerCase(); mapPage=0; renderMapeamento(); };
-  el.innerHTML='<div class="card-subtitle">Carregando atividade do agente…</div>';
-  try{
-    const url=`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent('Mapeamento de Processos')}&_cb=${Date.now()}`;
-    const res=await fetch(url,{cache:'no-store'});
-    const text=await res.text();
-    if(/exception|error|invalid/i.test(text)&&text.indexOf('{')<0) throw new Error('aba inexistente');
-    const json=JSON.parse(text.substring(text.indexOf('{'),text.lastIndexOf('}')+1));
-    const cols=(json.table.cols||[]).map(c=>(c.label||'').trim());
-    mapRows=(json.table.rows||[]).map(r=>{ const c=r.c||[]; const o={}; cols.forEach((lab,i)=>{ o[lab]=c[i]?(c[i].f!=null?c[i].f:c[i].v):''; }); return o; })
-      .filter(o=>Object.values(o).some(v=>v!==''&&v!=null));
-    mapPage=0; renderMapeamento();
-  }catch(e){
-    mapRows=[];
-    el.innerHTML='<div class="card-subtitle" style="padding:14px 0">A aba «Mapeamento de Processos» ainda não foi criada. Ela aparece automaticamente quando você instala e roda o agente (Apps Script). Assim que ele executar a primeira verificação, a atividade diária é listada aqui ao vivo.</div>';
-    document.getElementById('map-meta').textContent='agente ainda não executado';
-    document.getElementById('map-kpis').innerHTML='';
-    document.getElementById('map-info').textContent=''; document.getElementById('map-page-info').textContent=''; document.getElementById('map-pager').innerHTML='';
-  }
+  mapPage=0; renderMapeamento();
 }
 function renderMapeamento(){
-  const ativ=mapRows.filter(o=>{ const d=String(o['Data/Hora']||''); return d && !d.startsWith('—'); });
-  const totReg=ativ.length, notif=ativ.filter(o=>String(o['Cliente Notificado']||'').toLowerCase()==='sim').length;
-  const tipos=new Set(ativ.map(o=>o['Tipo de Movimentação']).filter(Boolean)).size;
-  const ultima=ativ.length?String(ativ[ativ.length-1]['Data/Hora']):'—';
-  document.getElementById('map-kpis').innerHTML=kpiMini('Movimentações registradas',fmtI.format(totReg))+kpiMini('Clientes notificados',fmtI.format(notif))+kpiMini('Tipos de movimentação',fmtI.format(tipos))+kpiMini('Último registro',ultima);
-  document.getElementById('map-meta').textContent=totReg?(fmtI.format(totReg)+' registros · lido ao vivo da planilha'):'sem registros ainda';
-  let rows=ativ.slice().reverse();
-  if(mapSearch){ const q=mapSearch; rows=rows.filter(o=>Object.values(o).some(v=>String(v).toLowerCase().includes(q))); }
+  const comMov=ROWS.filter(r=>r.ultMov||r.ultMovData||r.ultTeor);
+  const ativos=ROWS.filter(r=>r.status==='Ativo');
+  const comInteg=ROWS.filter(r=>r.intLim||r.intSent||r.intAc);
+  const agora=Date.now(); const recentes=comMov.filter(r=>{ const t=mapParseData(r.ultMovData); return t && (agora-t)<=30*864e5; });
+  document.getElementById('map-kpis').innerHTML=
+    kpiMini('Processos ativos',fmtI.format(ativos.length))+kpiMini('Com última movimentação',fmtI.format(comMov.length))+
+    kpiMini('Movimentações (30 dias)',fmtI.format(recentes.length))+kpiMini('Decisões com íntegra',fmtI.format(comInteg.length));
+  document.getElementById('map-meta').textContent=comMov.length?(fmtI.format(comMov.length)+' processos com movimentação registrada pelo agente · lido ao vivo'):'aguardando a primeira verificação do agente';
+  let rows=(comMov.length?comMov:ativos).slice().sort((a,b)=>mapParseData(b.ultMovData)-mapParseData(a.ultMovData));
+  if(mapSearch){ const q=mapSearch; rows=rows.filter(r=>[r.num,r.autor,r.reuRaw,r.trib,r.ultMov,r.prod].some(v=>String(v||'').toLowerCase().includes(q))); }
   const PG=25, total=rows.length, pages=Math.max(1,Math.ceil(total/PG));
   if(mapPage>=pages) mapPage=pages-1;
   const pg=rows.slice(mapPage*PG,(mapPage+1)*PG);
-  const cols=['Data/Hora','Nº do Processo','Cliente','Tribunal','Tipo de Movimentação','Resumo da Atualização','Cliente Notificado'];
-  let h='<table><thead><tr>'+cols.map(c=>'<th>'+c+'</th>').join('')+'</tr></thead><tbody>';
-  pg.forEach(o=>{ h+='<tr>'+cols.map((c,i)=>{ let v=escapeHtml(String(o[c]==null?'':o[c]));
-    if(i<=1) v='<span class="mono" style="font-size:11px">'+v+'</span>';
-    if(c==='Cliente Notificado') v=String(o[c]).toLowerCase()==='sim'?'<span class="pill p-green">Sim</span>':'<span class="pill p-slate">—</span>';
-    return '<td'+(c==='Resumo da Atualização'?' style="white-space:normal;max-width:340px"':'')+'>'+v+'</td>'; }).join('')+'</tr>'; });
-  if(!pg.length) h+='<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text-sub)">Nenhuma atividade ainda — o agente preenche aqui a cada verificação diária.</td></tr>';
+  let h='<table><thead><tr><th>Nº do processo</th><th>Cliente</th><th>Trib.</th><th>Status</th><th>Última movimentação</th><th>Data</th><th>Decisão</th></tr></thead><tbody>';
+  pg.forEach(r=>{ const cli=((r.autor||'').split('|')[0].trim()||(r.reuRaw||'').split('|')[0].trim());
+    const temTexto=r.ultTeor||r.intLim||r.intSent||r.intAc;
+    h+='<tr'+(temTexto?' style="cursor:pointer" onclick="showProcDecisao(\''+String(r.num||'').replace(/\D/g,'')+'\')"':'')+'>'+
+      '<td style="font-family:monospace;font-size:11px">'+escapeHtml(r.num||'—')+'</td>'+
+      '<td title="'+escapeHtml(cli)+'">'+escapeHtml(cli.length>26?cli.slice(0,24)+'…':cli)+'</td><td>'+escapeHtml(r.trib)+'</td><td>'+pill(r.status)+'</td>'+
+      '<td>'+(r.ultMov?escapeHtml(r.ultMov):'<span style="color:var(--text-muted)">—</span>')+'</td><td class="dim">'+escapeHtml(r.ultMovData||'—')+'</td>'+
+      '<td>'+(temTexto?'<span class="pill p-blue">ver teor</span>':'<span style="color:var(--text-muted)">—</span>')+'</td></tr>'; });
+  if(!pg.length) h+='<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text-sub)">Sem movimentações registradas ainda — o agente preenche as colunas de «Todos os Processos» na verificação diária.</td></tr>';
   h+='</tbody></table>';
   document.getElementById('map-table').innerHTML=h;
-  document.getElementById('map-info').textContent=fmtI.format(total)+' registros';
+  document.getElementById('map-info').textContent=fmtI.format(total)+' processos';
   document.getElementById('map-page-info').textContent='Exibindo '+(total?mapPage*PG+1:0)+'–'+Math.min((mapPage+1)*PG,total)+' de '+fmtI.format(total);
   const pgr=document.getElementById('map-pager'); pgr.innerHTML='';
   const mk=(t,dis,fn)=>{const b=document.createElement('button');b.className='pag-btn';b.textContent=t;b.disabled=dis;b.onclick=fn;return b;};
   pgr.appendChild(mk('‹',mapPage===0,()=>{mapPage--;renderMapeamento();}));
   const l=document.createElement('span');l.className='pag-info';l.style.padding='0 8px';l.textContent=(mapPage+1)+' / '+pages;pgr.appendChild(l);
   pgr.appendChild(mk('›',mapPage>=pages-1,()=>{mapPage++;renderMapeamento();}));
+}
+function showProcDecisao(numDigits){
+  const r=ROWS.find(x=>String(x.num||'').replace(/\D/g,'')===numDigits); if(!r) return;
+  const cli=(r.autor||'').split('|')[0].trim();
+  document.getElementById('modal-titulo').textContent='Decisões — '+(r.num||'')+(cli?(' · '+cli):'');
+  const sec=(tit,txt)=> txt?('<div style="margin:6px 0 16px"><div style="font-size:11px;font-weight:700;color:var(--primary-mid);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">'+tit+'</div><div style="font-size:12.5px;line-height:1.65;white-space:pre-wrap;color:var(--text-main)">'+escapeHtml(String(txt))+'</div></div>'):'';
+  let h=sec('Última movimentação'+(r.ultMovData?(' — '+r.ultMovData):''), r.ultMov?(r.ultMov+(r.ultTeor?('\n\n'+r.ultTeor):'')):r.ultTeor)+
+        sec('Íntegra da liminar', r.intLim)+sec('Íntegra da sentença', r.intSent)+sec('Íntegra do acórdão', r.intAc);
+  if(!h) h='<div class="card-subtitle">Sem texto de decisão para este processo ainda.</div>';
+  document.getElementById('modal-body').innerHTML=h;
+  document.getElementById('proc-modal').classList.add('open');
 }
 
 /* ════════════ DRILL-DOWN (clicar na métrica → lista) ════════════ */

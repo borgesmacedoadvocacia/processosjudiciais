@@ -226,6 +226,16 @@
   .btn-send:hover{background:var(--primary-mid);} .btn-send:disabled{opacity:.5;cursor:not-allowed;}
   .chat-foot{font-size:10.5px;color:var(--text-muted);line-height:1.5;}
 
+  /* ANÁLISE APROFUNDADA */
+  .ddgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  .ddstat{background:var(--card2);border:1px solid var(--border);border-radius:9px;padding:13px 15px;border-top:2px solid var(--neutral);}
+  .ddstat.c-orange{border-top-color:var(--warning);} .ddstat.c-red{border-top-color:var(--danger-mid);} .ddstat.c-blue{border-top-color:var(--info);} .ddstat.c-gold{border-top-color:var(--primary);}
+  .ddstat .l{font-size:10px;color:var(--text-sub);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:5px;}
+  .ddstat .v{font-size:23px;font-weight:800;color:var(--text-main);line-height:1;}
+  .ddstat .s{font-size:10px;color:var(--text-muted);margin-top:4px;line-height:1.35;}
+  .ddbar{height:6px;background:var(--border);border-radius:3px;overflow:hidden;}
+  .ddbar span{display:block;height:100%;background:var(--primary-mid);border-radius:3px;}
+
   /* CASCATA PROCESSUAL */
   .cascade{display:flex;gap:8px;flex-wrap:wrap;}
   .casc-stage{flex:1;min-width:124px;background:var(--card2);border:1px solid var(--border);border-radius:9px;padding:12px 14px;}
@@ -363,6 +373,34 @@
         <div class="card-title">Litigantes adversos recorrentes</div>
         <div class="card-subtitle">Top 12 contrapartes por volume na seleção</div>
         <div class="chart-wrap h340"><canvas id="c-reus"></canvas></div>
+      </div>
+    </div>
+
+    <!-- ANÁLISE APROFUNDADA -->
+    <div class="section-title">Análise aprofundada <span class="st-tag">Detalhamento</span></div>
+    <div class="row-2">
+      <div class="card">
+        <div class="card-title">Processos distribuídos por ano</div>
+        <div class="card-subtitle" id="dd-ano-sub">Contagem por ano de distribuição</div>
+        <div class="table-wrap" id="dd-ano"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Status das liminares</div>
+        <div class="card-subtitle" id="dd-lim-sub">Distribuição completa dos resultados de liminar</div>
+        <div class="table-wrap" id="dd-lim"></div>
+      </div>
+    </div>
+    <div class="row-1-2">
+      <div class="card">
+        <div class="card-title">Ativos pendentes de decisão</div>
+        <div class="card-subtitle">Processos ativos ainda em julgamento</div>
+        <div id="dd-pend"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Valores a receber por situação do alvará</div>
+        <div class="card-subtitle">Soma dos valores a receber em cada fase de alvará</div>
+        <div class="table-wrap" id="dd-alv"></div>
+        <div class="mfoot" id="dd-alv-foot"></div>
       </div>
     </div>
 
@@ -1193,8 +1231,60 @@ function initConsultor(){
   document.getElementById('chat-key').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); saveKey(); } });
 }
 
+/* ════════════ ANÁLISE APROFUNDADA ════════════ */
+function renderDeepDive(){
+  const f=FILTERED;
+  // 1) distribuídos por ano
+  const comAno=f.filter(r=>r.ano), semAno=f.length-comAno.length;
+  const anoMap=countBy(comAno,'ano');
+  const anos=[...anoMap.entries()].sort((a,b)=>a[0]-b[0]);
+  const maxA=Math.max(1, ...anos.map(e=>e[1]));
+  let ha='<table><thead><tr><th>Ano</th><th>Processos</th><th>%</th><th></th></tr></thead><tbody>';
+  anos.forEach(([y,c])=>{ ha+='<tr><td>'+y+'</td><td>'+fmtI.format(c)+'</td><td class="dim">'+pctTxt(c,comAno.length)+'</td><td style="width:36%"><div class="ddbar"><span style="width:'+(100*c/maxA).toFixed(1)+'%"></span></div></td></tr>'; });
+  if(semAno>0) ha+='<tr><td class="dim">Sem data</td><td>'+fmtI.format(semAno)+'</td><td class="dim">—</td><td></td></tr>';
+  ha+='<tr style="font-weight:700"><td>Total</td><td>'+fmtI.format(f.length)+'</td><td></td><td></td></tr></tbody></table>';
+  document.getElementById('dd-ano').innerHTML=ha;
+  document.getElementById('dd-ano-sub').textContent='Contagem por ano de distribuição'+(semAno?' · '+fmtI.format(semAno)+' sem data':'');
+
+  // 2) status das liminares (distribuição completa)
+  const limMap=countBy(f,'lim');
+  const limPref=['Liminar Concedida','Liminar Negada','Aguardando Julgamento','Não Julgada','Não Houve Pedido Liminar','Não Informado'];
+  const limKeys=limPref.filter(k=>limMap.has(k)).concat([...limMap.keys()].filter(k=>!limPref.includes(k)));
+  const lc=limMap.get('Liminar Concedida')||0, ln=limMap.get('Liminar Negada')||0, lag=limMap.get('Aguardando Julgamento')||0, lnj=limMap.get('Não Julgada')||0;
+  let hl='<table><thead><tr><th>Resultado da liminar</th><th>Proc.</th><th>%</th></tr></thead><tbody>';
+  limKeys.forEach(k=>{ const c=limMap.get(k)||0; const cls=k==='Liminar Concedida'?'pos':k==='Liminar Negada'?'neg':k==='Aguardando Julgamento'?'mid':''; hl+='<tr><td>'+(k==='Não Informado'?'<span class="dim">Não informado</span>':k)+'</td><td class="'+cls+'">'+fmtI.format(c)+'</td><td class="dim">'+pctTxt(c,f.length)+'</td></tr>'; });
+  hl+='</tbody></table>';
+  document.getElementById('dd-lim').innerHTML=hl;
+  document.getElementById('dd-lim-sub').innerHTML='Apreciadas (concedidas+negadas): <b>'+fmtI.format(lc+ln)+'</b> · deferimento <b>'+pctTxt(lc,lc+ln)+'</b> · aguardando julgamento: <b>'+fmtI.format(lag)+'</b> · não julgadas: <b>'+fmtI.format(lnj)+'</b>';
+
+  // 3) ativos pendentes de decisão
+  const ativ=f.filter(r=>r.status==='Ativo');
+  const aSent=ativ.filter(r=>r.sent==='Não Sentenciado').length;
+  const aRec=ativ.filter(r=>r.rec==='Aguardando Julgamento').length;
+  const aLim=ativ.filter(r=>r.lim==='Aguardando Julgamento').length;
+  document.getElementById('dd-pend').innerHTML='<div class="ddgrid">'+
+    '<div class="ddstat c-orange"><div class="l">Aguardam sentença</div><div class="v">'+fmtI.format(aSent)+'</div><div class="s">ativos sem sentença de mérito</div></div>'+
+    '<div class="ddstat c-red"><div class="l">Aguardam recurso</div><div class="v">'+fmtI.format(aRec)+'</div><div class="s">ativos com recurso no 2º grau</div></div>'+
+    '<div class="ddstat c-gold"><div class="l">Aguardam liminar</div><div class="v">'+fmtI.format(aLim)+'</div><div class="s">ativos com liminar não apreciada</div></div>'+
+    '<div class="ddstat c-blue"><div class="l">Total ativos</div><div class="v">'+fmtI.format(ativ.length)+'</div><div class="s">em curso na seleção</div></div>'+
+    '</div>';
+
+  // 4) valores a receber por situação do alvará
+  const alvOrder=['Ainda não Solicitado (Aguardando Prazo)','Creditado','Não há Valores a Receber','Processo em Fase de Conhecimento','Processo em Fase Recursal','Solicitado e Aguardando Compensação'];
+  const grp={}; f.forEach(r=>{ const k=r.alv||'ND'; if(!grp[k]) grp[k]={n:0,soma:0}; grp[k].n++; if(r.receber&&r.receber>0) grp[k].soma+=r.receber; });
+  const sumOf=k=>grp[k]?grp[k].soma:0;
+  let hv='<table><thead><tr><th>Situação do alvará</th><th>Proc.</th><th>Valores a receber</th></tr></thead><tbody>';
+  let totN=0, totS=0;
+  alvOrder.forEach(k=>{ const g=grp[k]||{n:0,soma:0}; totN+=g.n; totS+=g.soma; hv+='<tr><td>'+k+'</td><td>'+fmtI.format(g.n)+'</td><td>'+(g.soma>0?fmtMoney(g.soma):'—')+'</td></tr>'; });
+  Object.keys(grp).filter(k=>alvOrder.indexOf(k)<0).forEach(k=>{ const g=grp[k]; totN+=g.n; totS+=g.soma; hv+='<tr><td class="dim">'+(k==='ND'?'(não informado)':k)+'</td><td>'+fmtI.format(g.n)+'</td><td>'+(g.soma>0?fmtMoney(g.soma):'—')+'</td></tr>'; });
+  hv+='<tr style="font-weight:700"><td>Total</td><td>'+fmtI.format(totN)+'</td><td>'+fmtMoney(totS)+'</td></tr></tbody></table>';
+  document.getElementById('dd-alv').innerHTML=hv;
+  const pend=sumOf('Ainda não Solicitado (Aguardando Prazo)')+sumOf('Solicitado e Aguardando Compensação');
+  document.getElementById('dd-alv-foot').innerHTML='A receber pendente (aguardando prazo + aguardando compensação): <b>'+fmtMoney(pend)+'</b> · total geral a receber: <b>'+fmtMoney(totS)+'</b>.';
+}
+
 /* ════════════ PIPELINE ════════════ */
-function recompute(){ FILTERED=ROWS.filter(pass); renderReadout(); renderKPIs(); renderCascade(); updateCharts(); renderMatriz(); renderProdTable(); renderUfTable(); renderHeatmap(); renderReusTable(); renderDetail(); }
+function recompute(){ FILTERED=ROWS.filter(pass); renderReadout(); renderKPIs(); renderCascade(); updateCharts(); renderMatriz(); renderProdTable(); renderUfTable(); renderHeatmap(); renderReusTable(); renderDeepDive(); renderDetail(); }
 
 /* ancora a barra de abas logo abaixo do header (robusto a header que quebra em mobile) */
 function syncStickies(){ const h=document.querySelector('.header'); const tb=document.getElementById('tab-bar'); if(h&&tb) tb.style.top=h.offsetHeight+'px'; }
